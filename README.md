@@ -129,3 +129,34 @@ Progess:
 - [x] Built CRUD 
   - User + Tickers 
 - [x] Generator for Database Session 
+- As for the **Alert** System 
+  - You just need to supply `user_id` and `ticker_id` and SQLAlchemy will handle the relationships by themselves 
+  - Create a Pydantic with these and run your usual POST view and you'll be fine.
+
+
+**08/19**
+
+Quick **note**
+- Prefilling Edit forms is a **front-end responsiblity**
+- However; for the Swagger UI we could make the **Pydantic fields OPTIONAL**: `ticker_symbol: Optional[str] = None` 
+- This way we could work with the PUT view and remove some of the fields if we don't want to edit it 
+
+**Filter** 
+- It's important to know that `and` in a filter will evaluate True and False similar to normal python 
+- If you're trying to make sure both conditions are **True** 
+
+```py
+# WRONG query
+specific_alert = db.query(Alert).filter(Alert.user_id == user_id and Alert.ticker.symbol == ticker_symbol.lower()).first() 
+
+
+# Use a , instead of the AND clause
+specific_alert = db.query(Alert).filter(Alert.user_id == user_id, Alert.ticker.has(symbol = ticker_symbol.lower())).first() 
+```
+- Make sure we're using `has()` attribute since we're accessing another **FK** 
+
+**Progress**
+- [x] Alert CRUD finished 
+  - Alert searches via **ticker_symbol** converted to **ticker_id** for backend POST method 
+  - PUT allows optional fields via **Pydantic**  base model with **Optional** typing 
+  - Queries use the `has()` function for foreign relationship and fixed the logical error using the `and` instead of a `,` or `(condition 1) & (condition 2)`

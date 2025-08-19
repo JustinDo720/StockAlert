@@ -102,6 +102,13 @@ class TickerPD(BaseModel):
 
     symbol: str
 
+
+class AlertPD(BaseModel):
+    rule: Optional[RuleType] = 'fixed_price'
+    value: Optional[int] = None
+    user_id: Optional[int] = None 
+    ticker_symbol: Optional[str] = None 
+
 # ---- User Controller ---
 @app.get('/users')
 def get_users(user_id: Optional[int]=None, db: Session = Depends(session_generator)):
@@ -245,3 +252,93 @@ def remove_tickers(ticker_symbol: str, db: Session=Depends(session_generator)):
     return {
         'msg': "No available ticker with that ID"
     }
+
+@app.get('/alerts')
+def get_alerts(user_id: int, ticker_symbol: Optional[str] = None, db: Session = Depends(session_generator)):
+    """
+        We'll always need a user_id to find the alert associated with our users..
+
+        If a ticker_symbol is provided then we'll return one singular alert otherwise we'll return all the alerts
+        associated with that user 
+    """
+    if user_id and ticker_symbol is not None:
+        # Filter via user_id and ticker_id to get a specific alert 
+        specific_alert = db.query(Alert).filter(Alert.user_id == user_id, Alert.ticker.has(symbol = ticker_symbol.lower())).first() 
+
+        if specific_alert:
+            return {
+                'alert': specific_alert.to_dict()
+            }
+        # There are no alerts with the requested user_id and ticker_id 
+        return {
+            'msg': "No available alert with that ticker Symbol and user ID"
+        }
+    else:
+        # We return all of our user's alerts 
+        user_alerts = db.query(Alert).filter(Alert.user_id == user_id)
+        return {
+            'alerts': [alert.to_dict() for alert in user_alerts]
+        }
+    
+@app.post('/alerts')
+def add_alert(alert_details: AlertPD, db: Session = Depends(session_generator)):
+    details = alert_details.model_dump()
+
+    # Since our PD has a ticker_symbol we must check for that symbol and find the id
+    ticker = db.query(Ticker).filter(Ticker.symbol == details['ticker_symbol'].lower()).first()
+    if ticker:
+        # We need to replace 'ticker_symbol' key with 'ticker_id'
+        refined_details = {key: detail for key,detail in details.items() if key != 'ticker_symbol'}
+        refined_details['ticker_id'] = ticker.id
+
+        # Using the new details with the right ticker id to POST our alert 
+        alert_instance = Alert(**refined_details)
+        db.add(alert_instance)
+        db.commit()
+
+        return {
+            'alert': alert_instance.to_dict()
+        }
+
+    return {
+        'msg': "That ticker symbol does not exist in our Database."
+    }
+
+@app.put('/alerts')
+def update_alert(user_id: int, ticker_symbol: str, alert_details: AlertPD, db: Session = Depends(session_generator)):
+    alert = db.query(Alert).filter(Alert.user_id == user_id, Alert.ticker.has(symbol = ticker_symbol.lower())).first()
+
+    for key, detail in alert_details.model_dump().items():
+        if detail is not None:
+            # Make sure it isn't a change to the ticker 
+            if key == 'ticker_symbol':
+                # Find the ticker and update the ticker_id as ticker_symbol doesn't exist as a field in our Alert model 
+                #
+                # ticker_symbol is just an easier way to find the ticker as opposed to ticker_id 
+                ticker = db.query(Ticker).filter(Ticker.symbol == detail.lower()).first()
+                if ticker:
+                    # Make sure our ticker exists before changing the ticker_id 
+                    setattr(alert, 'ticker_id', ticker.id)
+            else: 
+                # Good to use set attribute 
+                setattr(alert, key, detail)
+
+    # Always update in our database 
+    db.commit() 
+    db.refresh(alert)
+    return {
+        'alert': alert.to_dict()
+    }
+
+@app.delete('/alerts')
+def delete_alert(user_id: int, ticker_symbol: str, db: Session = Depends(session_generator)):
+    alert = db.query(Alert).filter((Alert.user_id == user_id) & (Alert.ticker.has(symbol=ticker_symbol.lower()))).first()
+    if alert:
+        db.delete(alert)
+        db.commit() 
+        return {
+            'msg': f"An alert for user id: {user_id} with a ticker symbol: {ticker_symbol.upper()} was removed successfully."
+        }
+    return {
+            'msg': f"An alert for user id: {user_id} with a ticker symbol: {ticker_symbol.upper()} does not exist."
+        }
