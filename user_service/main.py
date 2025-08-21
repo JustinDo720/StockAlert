@@ -4,12 +4,14 @@ from sqlalchemy import create_engine, Column, String, Integer, Float, ForeignKey
 import enum
 from typing import Generator, Optional
 from pydantic import BaseModel
+import requests
 
 # Initialize App 
 app = FastAPI()
+FLASK_TICKER_MICROSERVICE_URL = 'http://localhost:5000'
 
 # ---- SQLAlchemy Setup ----
-DATAABASE_URI = 'sqlite:///./user_service.db'
+DATAABASE_URI = 'sqlite:///instance/user_service.db'
 # Creating the engine based off the URI
 engine = create_engine(DATAABASE_URI)
 
@@ -203,20 +205,35 @@ def get_tickers(ticker_symbol: Optional[str]=None, db: Session= Depends(session_
         return {
             'tickers': ticker
         }
-    
+
+# POSTING tickers will trigger a syncronous request to our Flask Ticker Microservice
 @app.post('/tickers')
 def add_tickers(ticker_details: TickerPD, db: Session=Depends(session_generator)):
     details = ticker_details.model_dump() 
     details['symbol'] = details['symbol'].lower() 
+
+    # Need to check if our ticker already exists before adding it to our db and sending a request to our Flask Ticker Service
+    existing_ticker = db.query(Ticker).filter(Ticker.symbol == details['symbol']).first()
+    if existing_ticker:
+        return {
+            'msg': "That ticker already exists in our Database."
+        }
+
+    # Now we know for certain that the ticker doesn't exist in our database
     ticker_model = Ticker(**details)
     
     db.add(ticker_model)
     db.commit()
 
+    # Aftering a successful post we needd to send a request to our Flask Ticker Service 
+    response = requests.post(f'{FLASK_TICKER_MICROSERVICE_URL}/tickers', json={'symbol': ticker_model.symbol})
+    response.raise_for_status()
+    # If the request was successful we return the ticker model
     return {
         'ticker': ticker_model.to_dict()
+    } if response.status_code == 200 else {
+        'msg': "There was an error adding the ticker to the Flask Ticker Service"
     }
-
 
 @app.put('/tickers')
 def update_tickers(ticker_symbol: str, new_ticker_details: TickerPD, db: Session=Depends(session_generator)):
